@@ -50,6 +50,14 @@ const InterestCalculator: React.FC = () => {
   return (
     <>
       <Typography variant="h4" gutterBottom textAlign={'center'}>Interest Calculator</Typography>
+      <Box display="flex" justifyContent="center" marginBottom={2}>
+        <TextField
+          label="Custom Interest Rate (%)"
+          type="number"
+          value={customRate}
+          onChange={(e) => setCustomRate(e.target.value)}
+        />
+      </Box>
       <div className="container">
         <Box component={Container}>
           <TextField
@@ -69,14 +77,6 @@ const InterestCalculator: React.FC = () => {
             fullWidth
             margin="normal"
           />
-          <TextField
-            label="Custom Interest Rate (%)"
-            type="number"
-            value={customRate}
-            onChange={(e) => setCustomRate(e.target.value)}
-            fullWidth
-            margin="normal"
-          />
           <Button variant="contained" color="primary" onClick={handleAddTransaction} fullWidth>
             Add Transaction
           </Button>
@@ -88,7 +88,7 @@ const InterestCalculator: React.FC = () => {
                   <TableCell>Amount</TableCell>
                   <TableCell>Interest (24%)</TableCell>
                   <TableCell>Interest (18%)</TableCell>
-                  <TableCell>Custom Interest</TableCell>
+                  <TableCell>Custom Interest ({customRate}%)</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -114,8 +114,8 @@ const InterestCalculator: React.FC = () => {
                 <TableCell>Total Sum (Principal + Interest 24%)</TableCell>
                 <TableCell>Total Interest (18%)</TableCell>
                 <TableCell>Total Sum (Principal + Interest 18%)</TableCell>
-                <TableCell>Total Custom Interest</TableCell>
-                <TableCell>Total Sum (Principal + Custom Interest)</TableCell>
+                <TableCell>Total Custom Interest ({customRate}%)</TableCell>
+                <TableCell>Total Sum (Principal + Custom Interest ({customRate}%))</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
