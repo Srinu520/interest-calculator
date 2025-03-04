@@ -14,7 +14,7 @@ const InterestCalculator: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [date, setDate] = useState("");
   const [amount, setAmount] = useState("");
-  const [customRate, setCustomRate] = useState("");
+  const [customRate, setCustomRate] = useState(12);
   const interestRate24 = 24; // 24% per annum
   const interestRate18 = 18; // 18% per annum
 
