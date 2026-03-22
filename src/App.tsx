@@ -1,139 +1,190 @@
-import React, { useState } from "react";
-import { TextField, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Typography, Box, Container } from "@mui/material";
+import { useEffect, useState } from "react";
+import { Box, Container, CssBaseline, ThemeProvider, useMediaQuery } from "@mui/material";
 import dayjs from "dayjs";
-import './App.css'
-interface Transaction {
-  date: string;
-  amount: number;
-  interest24: number;
-  interest18: number;
-  customInterest: number;
-}
+import "./App.css";
+import { AppHeader } from "./components/AppHeader";
+import { InputToolbar } from "./components/InputToolbar";
+import { SummaryStrip } from "./components/SummaryStrip";
+import { TransactionBreakdown } from "./components/TransactionBreakdown";
+import { theme } from "./theme";
+import type { SortDirection, SortField, Transaction } from "./types";
+import {
+  buildSummaryMetrics,
+  buildTransactionDetails,
+  calculateTotals,
+  findOldestTransactionDetails,
+} from "./utils/calculations";
+import { getRecordName } from "./utils/formatters";
+import { compareTransactionDetails } from "./utils/sorting";
+import {
+  loadStoredCustomRate,
+  loadStoredTransactions,
+  persistCustomRate,
+  persistTransactions,
+} from "./utils/storage";
 
-const InterestCalculator: React.FC = () => {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+const App = () => {
+  const [transactions, setTransactions] = useState<Transaction[]>(() => loadStoredTransactions());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [name, setName] = useState("");
   const [date, setDate] = useState("");
   const [amount, setAmount] = useState("");
-  const [customRate, setCustomRate] = useState('12');
-  const interestRate24 = 24; // 24% per annum
-  const interestRate18 = 18; // 18% per annum
+  const [customRate, setCustomRate] = useState(() => loadStoredCustomRate());
+  const [sortField, setSortField] = useState<SortField>("date");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
 
-  const calculateInterest = (transactionDate: string, amount: number, rate: number): number => {
-    const daysElapsed = dayjs().diff(dayjs(transactionDate), "day");
-    return (amount * (rate / 100) * daysElapsed) / 365;
-  };
+  const calculationDate = dayjs().startOf("day");
+  const today = calculationDate.format("YYYY-MM-DD");
+  const parsedAmount = Number.parseFloat(amount);
+  const trimmedCustomRate = customRate.trim();
+  const parsedCustomRate = Number.parseFloat(trimmedCustomRate);
+  const hasValidDate = Boolean(date) && !dayjs(date).isAfter(calculationDate, "day");
+  const hasValidAmount = Number.isFinite(parsedAmount) && parsedAmount > 0;
+  const hasActiveCustomRate =
+    trimmedCustomRate !== "" &&
+    Number.isFinite(parsedCustomRate) &&
+    parsedCustomRate > 0;
+  const hasValidCustomRate = trimmedCustomRate === "" || hasActiveCustomRate;
+  const customRateValue = hasActiveCustomRate ? parsedCustomRate : null;
+  const customRateLabel = hasActiveCustomRate
+    ? Number.isInteger(parsedCustomRate)
+      ? parsedCustomRate.toFixed(0)
+      : parsedCustomRate.toFixed(2)
+    : null;
+  const canSubmit = hasValidDate && hasValidAmount && hasValidCustomRate;
+  const isEditing = editingId !== null;
+  const isCompact = useMediaQuery(theme.breakpoints.down("md"));
 
-  const handleAddTransaction = () => {
-    if (!date || !amount || !customRate) return;
-    const amt = parseFloat(amount);
-    const customRateValue = parseFloat(customRate);
-    if (isNaN(amt) || amt <= 0 || isNaN(customRateValue) || customRateValue <= 0) return;
+  useEffect(() => {
+    persistTransactions(transactions);
+  }, [transactions]);
 
-    const interest24 = calculateInterest(date, amt, interestRate24);
-    const interest18 = calculateInterest(date, amt, interestRate18);
-    const customInterest = calculateInterest(date, amt, customRateValue);
+  useEffect(() => {
+    persistCustomRate(customRate);
+  }, [customRate]);
 
-    setTransactions([...transactions, { date, amount: amt, interest24, interest18, customInterest }]);
+  const baseTransactionDetails = transactions.map((transaction) =>
+    buildTransactionDetails(transaction, calculationDate, customRateValue),
+  );
+
+  const transactionDetails = [...baseTransactionDetails].sort((left, right) =>
+    compareTransactionDetails(left, right, sortField, sortDirection),
+  );
+
+  const totals = calculateTotals(baseTransactionDetails);
+  const oldestTransaction = findOldestTransactionDetails(baseTransactionDetails);
+  const summaryMetrics = buildSummaryMetrics({
+    transactionCount: transactions.length,
+    totals,
+    calculationDate,
+    hasActiveCustomRate,
+    customRateLabel,
+  });
+
+  const resetForm = () => {
+    setEditingId(null);
+    setName("");
     setDate("");
     setAmount("");
-    // setCustomRate("");
   };
 
-  const totalPrincipal = transactions.reduce((sum, t) => sum + t.amount, 0);
-  const totalInterest24 = transactions.reduce((sum, t) => sum + t.interest24, 0);
-  const totalInterest18 = transactions.reduce((sum, t) => sum + t.interest18, 0);
-  const totalCustomInterest = transactions.reduce((sum, t) => sum + t.customInterest, 0);
-  const totalSum24 = totalPrincipal + totalInterest24;
-  const totalSum18 = totalPrincipal + totalInterest18;
-  const totalCustomSum = totalPrincipal + totalCustomInterest;
+  const handleSubmitTransaction = () => {
+    if (!canSubmit) {
+      return;
+    }
+
+    const nextTransaction: Transaction = {
+      id: editingId ?? crypto.randomUUID(),
+      name: name.trim(),
+      date,
+      amount: parsedAmount,
+    };
+
+    setTransactions((currentTransactions) =>
+      editingId === null
+        ? [...currentTransactions, nextTransaction]
+        : currentTransactions.map((transaction) =>
+            transaction.id === editingId ? nextTransaction : transaction,
+          ),
+    );
+
+    resetForm();
+  };
+
+  const handleEditTransaction = (transaction: Transaction) => {
+    setEditingId(transaction.id);
+    setName(transaction.name);
+    setDate(transaction.date);
+    setAmount(String(transaction.amount));
+  };
+
+  const handleDeleteTransaction = (transaction: Transaction) => {
+    const recordName = getRecordName(transaction.name);
+    const shouldDelete = window.confirm(`Delete record "${recordName}"?`);
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    setTransactions((currentTransactions) =>
+      currentTransactions.filter((currentTransaction) => currentTransaction.id !== transaction.id),
+    );
+
+    if (editingId === transaction.id) {
+      resetForm();
+    }
+  };
 
   return (
-    <>
-      <Typography variant="h4" gutterBottom textAlign={'center'}>Interest Calculator</Typography>
-      <Box display="flex" justifyContent="center" marginBottom={2}>
-        <TextField
-          label="Custom Interest Rate (%)"
-          type="number"
-          value={customRate}
-          onChange={(e) => setCustomRate(e.target.value)}
-        />
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box className="app-shell">
+        <Container maxWidth="xl" sx={{ px: { xs: 1.25, sm: 2.5, md: 3 } }}>
+          <AppHeader
+            calculationDate={calculationDate}
+            isEditing={isEditing}
+            name={name}
+            oldestTransaction={oldestTransaction}
+          />
+          <SummaryStrip metrics={summaryMetrics} />
+          <InputToolbar
+            name={name}
+            date={date}
+            amount={amount}
+            customRate={customRate}
+            today={today}
+            hasValidDate={hasValidDate}
+            hasValidAmount={hasValidAmount}
+            hasValidCustomRate={hasValidCustomRate}
+            trimmedCustomRate={trimmedCustomRate}
+            hasActiveCustomRate={hasActiveCustomRate}
+            customRateLabel={customRateLabel}
+            isEditing={isEditing}
+            canSubmit={canSubmit}
+            onNameChange={setName}
+            onDateChange={setDate}
+            onAmountChange={setAmount}
+            onCustomRateChange={setCustomRate}
+            onSubmit={handleSubmitTransaction}
+            onCancel={resetForm}
+          />
+          <TransactionBreakdown
+            items={transactionDetails}
+            isCompact={isCompact}
+            editingId={editingId}
+            hasActiveCustomRate={hasActiveCustomRate}
+            customRateLabel={customRateLabel}
+            sortField={sortField}
+            sortDirection={sortDirection}
+            onSortFieldChange={setSortField}
+            onSortDirectionChange={setSortDirection}
+            onEdit={handleEditTransaction}
+            onDelete={handleDeleteTransaction}
+          />
+        </Container>
       </Box>
-      <div className="container">
-        <Box component={Container}>
-          <TextField
-            label="Transaction Date"
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-            fullWidth
-            margin="normal"
-          />
-          <TextField
-            label="Amount"
-            type="number"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            fullWidth
-            margin="normal"
-          />
-          <Button variant="contained" color="primary" onClick={handleAddTransaction} fullWidth>
-            Add Transaction
-          </Button>
-          <TableContainer component={Paper} style={{ marginTop: 20 }}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Date</TableCell>
-                  <TableCell>Amount</TableCell>
-                  <TableCell>Interest (24%)</TableCell>
-                  <TableCell>Interest (18%)</TableCell>
-                  <TableCell>Custom Interest ({customRate}%)</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {transactions.map((t, index) => (
-                  <TableRow key={index}>
-                    <TableCell>{t.date}</TableCell>
-                    <TableCell>{t.amount.toFixed(2)}</TableCell>
-                    <TableCell>{t.interest24.toFixed(2)}</TableCell>
-                    <TableCell>{t.interest18.toFixed(2)}</TableCell>
-                    <TableCell>{t.customInterest.toFixed(2)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Box>
-        <TableContainer component={Paper} style={{ marginTop: 20 }}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Total Principal</TableCell>
-                <TableCell>Total Interest (24%)</TableCell>
-                <TableCell>Total Sum (Principal + Interest 24%)</TableCell>
-                <TableCell>Total Interest (18%)</TableCell>
-                <TableCell>Total Sum (Principal + Interest 18%)</TableCell>
-                <TableCell>Total Custom Interest ({customRate}%)</TableCell>
-                <TableCell>Total Sum (Principal + Custom Interest ({customRate}%))</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              <TableRow>
-                <TableCell>{totalPrincipal.toFixed(2)}</TableCell>
-                <TableCell>{totalInterest24.toFixed(2)}</TableCell>
-                <TableCell>{totalSum24.toFixed(2)}</TableCell>
-                <TableCell>{totalInterest18.toFixed(2)}</TableCell>
-                <TableCell>{totalSum18.toFixed(2)}</TableCell>
-                <TableCell>{totalCustomInterest.toFixed(2)}</TableCell>
-                <TableCell>{totalCustomSum.toFixed(2)}</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </div>
-    </>
+    </ThemeProvider>
   );
 };
 
-export default InterestCalculator;
+export default App;
